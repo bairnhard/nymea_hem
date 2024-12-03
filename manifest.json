@@ -1,0 +1,13 @@
+{
+    "domain": "nymea_hem",
+    "name": "Nymea HEM Integration",
+    "version": "1.0.0",
+    "documentation": "https://github.com/bairnhard/nymea_hem",
+    "requirements": [
+        "voluptuous>=0.12.2"
+    ],
+    "codeowners": ["@bairnhard"],
+    "config_flow": true,
+    "iot_class": "local_polling",
+    "platforms": ["sensor"]
+}
