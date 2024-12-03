@@ -51,7 +51,7 @@ This custom integration allows Home Assistant to interface with Nymea devices, f
 
 ### Enable debug logs for detailed information
 
-```yaml
+`yaml
 
 logger:
   default: warning
@@ -59,10 +59,12 @@ logger:
     custom_components.nymea_hem: debug
     custom_components.nymea_hem.sensor: debug
     custom_components.nymea_hem.nymea_client: debug
+`
 
 ### Logs
 
 Logs can help identify:
+
 - **Connection issues**.
 - **Errors in device state mapping**.
 - **Issues with authentication or polling**.
@@ -93,7 +95,8 @@ Logs can help identify:
 ### Testing the Connection
 
 Run the following Python script to verify Nymea connectivity:
-```python
+`
+python
 from nymea_client import NymeaClient
 import asyncio
 
@@ -105,18 +108,15 @@ async def test_connection():
 
 asyncio.run(test_connection())
 
+`
+
 Replace HOST, USERNAME, and PASSWORD with your Nymea server details.
 
-##Contributing
+## Contributing
 
 I love feedback and contributions to improve this integration.
 Please open an issue or submit a pull request for any changes or feature requests.
 
-##License
+## License
 
 This project is licensed under the MIT License.
-
-
-
-
-
