@@ -49,7 +49,7 @@ This custom integration allows Home Assistant to interface with Nymea devices, f
 
 ## Debugging
 
-### Enable debug logs for detailed information:
+### Enable debug logs for detailed information
 
 ```yaml
 
