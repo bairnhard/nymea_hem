@@ -95,8 +95,8 @@ Logs can help identify:
 ### Testing the Connection
 
 Run the following Python script to verify Nymea connectivity:
-`
-python
+
+`python
 from nymea_client import NymeaClient
 import asyncio
 
