@@ -44,7 +44,7 @@ This custom integration allows Home Assistant to interface with Nymea devices, f
    - The default polling interval is `30 seconds`. You can modify this in the integration options.
 
 3. **Sensors and Units**:
-   - Sensors are dynamically created for each state of a Nymea device. 
+   - Sensors are dynamically created for each state of a Nymea device.
    - Units are mapped from Nymea's system to Home Assistant's units (e.g., `UnitWatt` to `W`).
 
 ## Debugging
@@ -119,4 +119,4 @@ Please open an issue or submit a pull request for any changes or feature request
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the MIT License

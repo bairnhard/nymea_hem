@@ -1,6 +1,8 @@
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.entity import Entity
 from homeassistant.components.sensor import SensorEntity
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.helpers.device_registry import async_get
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.const import (
     DEVICE_CLASS_TEMPERATURE,
     DEVICE_CLASS_ENERGY,
@@ -63,7 +65,6 @@ def convert_value(value, value_type):
         'Int': lambda x: int(x),
         'Uint': lambda x: abs(int(x)),
         'String': lambda x: str(x),
-        # Default is to return as-is
         'Object': lambda x: x,
         'Color': lambda x: x
     }
@@ -77,15 +78,40 @@ def convert_value(value, value_type):
 
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
-    """Set up Nymea sensors dynamically based on states."""
-    coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
+    """Set up sensors for the Nymea integration."""
     client = hass.data[DOMAIN][config_entry.entry_id]["client"]
+    coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
+    server_info = hass.data[DOMAIN].get("server_info", {})
+    
+    device_registry = async_get(hass)
+    
+    nymea_server_device = device_registry.async_get_or_create(
+        config_entry_id=config_entry.entry_id,
+        identifiers={(DOMAIN, server_info.get("uuid", "unknown_uuid"))},
+        name=server_info.get("name", "Nymea Server"),
+        manufacturer="Nymea",
+        model=server_info.get("server", "Unknown Model"),
+        sw_version=server_info.get("version", "Unknown"),
+    )
 
     sensors = []
+    
+    # Add Nymea Server Info sensor
+    sensors.append(
+        NymeaServerInfoSensor(
+            coordinator, 
+            "Nymea Server Info", 
+            server_info,
+            device_id=nymea_server_device.id
+        )
+    )
+
+
+    # Fetch all devices and their states
 
     for thing in coordinator.data:
         thing_class_id = thing.get("thingClassId")
-        
+                
         # Fetch thing class details
         try:
             thing_class_details = await client.get_thing_class_details(thing_class_id)
@@ -114,21 +140,22 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                     NymeaHEMStateSensor(
                         coordinator, 
                         thing, 
-                        state_type
+                        state_type,
+                        device_id=nymea_server_device.id
                     )
-                )
-
+                )    
     async_add_entities(sensors)
 
 
-class NymeaHEMStateSensor(CoordinatorEntity, SensorEntity):
+class NymeaHEMStateSensor(CoordinatorEntity, SensorEntity):    
     """Representation of a single state from a thing."""
 
-    def __init__(self, coordinator, thing_data, state_type):
+    def __init__(self, coordinator, thing_data, state_type, device_id=None):
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._thing_data = thing_data
         self._state_type = state_type
+        self._device_id = device_id
         
         # Construct name with fallback
         display_name = state_type.get('displayName', state_type.get('name', 'Unknown'))
@@ -170,3 +197,49 @@ class NymeaHEMStateSensor(CoordinatorEntity, SensorEntity):
             "interfaces": self._thing_data.get("interfaces", []),
             "thing_class_name": self._thing_data.get("thingClassName")
         }
+        
+class NymeaServerInfoSensor(CoordinatorEntity):
+    """Sensor to display Nymea server information."""
+
+    def __init__(self, coordinator, name, server_info, device_id=None):
+        """Initialize the server info sensor."""
+        super().__init__(coordinator)
+        self._name = name
+        self._server_info = server_info
+        self._device_id = device_id
+
+    @property
+    def device_info(self):
+        """Return device information if available."""
+        if self._device_id:
+            return DeviceInfo(
+                identifiers={(DOMAIN, self._server_info.get("uuid", "unknown_uuid"))},
+                name=self._server_info.get("name", "Nymea Server"),
+                manufacturer="Nymea",
+                model=self._server_info.get("server", "Unknown Model"),
+                sw_version=self._server_info.get("version", "Unknown"),                
+            )
+
+    @property
+    def name(self):
+        return f"{self._server_info.get('name')} Server Info"
+
+    @property
+    def state(self):    
+        return self._server_info.get("version")
+
+    @property
+    def extra_state_attributes(self):
+        """Return other attributes of the server."""
+        return {
+            "uuid": self._server_info.get("uuid"),
+            "protocol_version": self._server_info.get("protocol version"),
+            "server_name": self._server_info.get("name"),
+            "language": self._server_info.get("language"),
+            "locale": self._server_info.get("locale"),
+            "experiences": [exp["name"] for exp in self._server_info.get("experiences", [])],
+        }
+
+    @property
+    def icon(self):        
+        return "mdi:server"

@@ -73,13 +73,37 @@ class NymeaClient:
             # Include the token in the handshake if it's available
             hello_message["token"] = self._token
 
-        self._writer.write((json.dumps(hello_message) + "\n").encode())
-        await self._writer.drain()
-        hello_response = await self._read_full_response()
-        _LOGGER.debug(f"Hello Response: {hello_response}")
-        response_data = json.loads(hello_response)
-        if response_data.get("status") != "success":
-            raise ValueError("Handshake failed")
+        try:
+            self._writer.write((json.dumps(hello_message) + "\n").encode())
+            await self._writer.drain()
+            hello_response = await self._read_full_response()
+            _LOGGER.debug(f"Hello Response: {hello_response}")
+            response_data = json.loads(hello_response)
+
+            if response_data.get("status") != "success":
+                error = response_data.get("error", "Unknown error")
+                raise ValueError(f"Handshake failed: {error}")
+
+            # Store server details
+            params = response_data.get("params", {})
+            self._server_info = {
+                "authentication_required": params.get("authenticationRequired"),
+                "experiences": params.get("experiences", []),
+                "initial_setup_required": params.get("initialSetupRequired"),
+                "language": params.get("language"),
+                "locale": params.get("locale"),
+                "name": params.get("name"),
+                "protocol_version": params.get("protocol version"),
+                "server": params.get("server"),
+                "uuid": params.get("uuid"),
+                "version": params.get("version"),                
+            }
+            _LOGGER.info(f"Server Info: {self._server_info}")
+
+        except Exception as e:
+            _LOGGER.error(f"Error during handshake: {e}")
+            raise
+
 
     async def authenticate(self):
         """Authenticate and establish session."""
@@ -111,7 +135,7 @@ class NymeaClient:
         except Exception as e:
             _LOGGER.error(f"Authentication error: {e}")
             raise
-
+        
     async def close_connection(self):
         """Close the writer connection gracefully, with fallback to forceful closure."""
         if self._writer:

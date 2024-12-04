@@ -38,6 +38,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         )
 
         await nymea_client.authenticate()
+        
+            # Get Hello response
+        hello_response = await nymea_client._handshake()
+        hass.data[DOMAIN] = {
+            "client": nymea_client,
+            "server_info": getattr(nymea_client, '_server_info', {
+                "name": "Unknown Nymea Server",
+                "version": "Unknown"
+            }),
+        }
 
         async def async_update_data():
             """Fetch updated data from Nymea."""
