@@ -3,14 +3,9 @@ from homeassistant.helpers.entity import Entity
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.helpers.device_registry import async_get
 from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.const import (
-    DEVICE_CLASS_TEMPERATURE,
-    DEVICE_CLASS_ENERGY,
-    DEVICE_CLASS_POWER,
-    DEVICE_CLASS_VOLTAGE,
-    DEVICE_CLASS_CURRENT,
-    DEVICE_CLASS_FREQUENCY,
+from homeassistant.components.sensor import SensorDeviceClass
 
+from homeassistant.const import (
     UnitOfTemperature,
     UnitOfEnergy,
     UnitOfPower,
@@ -47,11 +42,11 @@ UNIT_MAP = {
 }
 
 INTERFACE_DEVICE_CLASS_MAP = {
-    "temperaturesensor": DEVICE_CLASS_TEMPERATURE,
-    "energymeter": DEVICE_CLASS_ENERGY,
-    "smartmeter": DEVICE_CLASS_ENERGY,
-    "smartmeterproducer": DEVICE_CLASS_POWER,
-    "powersocket": DEVICE_CLASS_POWER,
+    "temperaturesensor": SensorDeviceClass.TEMPERATURE,
+    "energymeter": SensorDeviceClass.ENERGY,
+    "smartmeter": SensorDeviceClass.ENERGY,
+    "smartmeterproducer": SensorDeviceClass.POWER,
+    "powersocket": SensorDeviceClass.POWER,
     "humiditysensor": "humidity", 
 }
 
