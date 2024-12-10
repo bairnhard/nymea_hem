@@ -1,7 +1,7 @@
 {
     "domain": "nymea_hem",
     "name": "Nymea HEM Integration",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "documentation": "https://github.com/bairnhard/nymea_hem",
     "requirements": [
         "voluptuous>=0.12.2"
