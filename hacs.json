@@ -1,0 +1,9 @@
+{
+    "domains": ["sensor"],
+    "name": "Nymea HEM",
+    "content_in_root": false,
+    "country": "worldwide",
+    "homeassistant": "2023.0.0",
+    "iot_class": "local_polling"
+}
+  

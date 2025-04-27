@@ -9,5 +9,6 @@
     "codeowners": ["@bairnhard"],
     "config_flow": true,
     "iot_class": "local_polling",
-    "platforms": ["sensor"]
+    "platforms": ["sensor"],
+    "integration_type": "integration"
 }
