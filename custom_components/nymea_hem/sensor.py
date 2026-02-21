@@ -168,20 +168,56 @@ class NymeaHEMStateSensor(CoordinatorEntity, SensorEntity):
         
         # Determine state type for conversion
         self._value_type = state_type.get('type', 'String')
+        self._max_state_len = 255
+
+    def _get_live_thing_data(self):
+        """Return the most recent thing payload from coordinator data."""
+        current_thing_id = self._thing_data.get("id")
+        for thing in self.coordinator.data or []:
+            if thing.get("id") == current_thing_id:
+                return thing
+        return self._thing_data
+
+    def _get_live_state(self):
+        """Return the matching state object from current thing data."""
+        thing = self._get_live_thing_data()
+        for state in thing.get("states", []):
+            if state.get("stateTypeId") == self._state_type.get("id"):
+                return state
+        return None
+
+    def _get_live_value(self):
+        """Return converted value and raw value from the current state."""
+        state = self._get_live_state()
+        if not state:
+            return "Unknown", None
+
+        raw_value = state.get("value", "Unknown")
+        converted = convert_value(raw_value, self._value_type)
+        return converted, raw_value
 
     @property
     def native_value(self):
-        """Return the current value of the state with type conversion."""
-        for state in self._thing_data.get("states", []):
-            if state["stateTypeId"] == self._state_type["id"]:
-                value = state.get("value", "Unknown")
-                return convert_value(value, self._value_type)
-        return "Unknown"
+        """Return the current value in a HA-safe shape."""
+        value, _ = self._get_live_value()
+
+        # Keep complex payloads out of state; expose them via attributes.
+        if isinstance(value, (dict, list, tuple, set)):
+            return None
+
+        # HA state is limited to 255 characters.
+        if isinstance(value, str) and len(value) > self._max_state_len:
+            return None
+
+        return value
 
     @property
     def extra_state_attributes(self):
         """Return additional attributes with HASS-friendly formatting."""
-        return {
+        thing = self._get_live_thing_data()
+        value, raw_value = self._get_live_value()
+
+        attributes = {
             "state_type_id": self._state_type["id"],
             "state_name": self._state_type["name"],
             "state_type": self._value_type,
@@ -192,6 +228,25 @@ class NymeaHEMStateSensor(CoordinatorEntity, SensorEntity):
             "interfaces": self._thing_data.get("interfaces", []),
             "thing_class_name": self._thing_data.get("thingClassName")
         }
+
+        # Include full payload as attribute when it cannot be represented as state.
+        if isinstance(value, (dict, list, tuple, set)):
+            attributes["value_payload"] = raw_value
+            attributes["value_in_state"] = False
+        elif isinstance(value, str) and len(value) > self._max_state_len:
+            attributes["value_payload"] = raw_value
+            attributes["value_length"] = len(value)
+            attributes["value_in_state"] = False
+        else:
+            attributes["value_in_state"] = True
+
+        # Return current thing metadata from coordinator refreshes.
+        attributes["thing_name"] = thing.get("name", self._thing_data['name'])
+        attributes["thing_class_id"] = thing.get("thingClassId", self._thing_data.get("thingClassId"))
+        attributes["interfaces"] = thing.get("interfaces", self._thing_data.get("interfaces", []))
+        attributes["thing_class_name"] = thing.get("thingClassName", self._thing_data.get("thingClassName"))
+
+        return attributes
         
 class NymeaServerInfoSensor(CoordinatorEntity):
     """Sensor to display Nymea server information."""

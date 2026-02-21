@@ -117,6 +117,14 @@ Replace HOST, USERNAME, and PASSWORD with your Nymea server details.
 I love feedback and contributions to improve this integration.
 Please open an issue or submit a pull request for any changes or feature requests.
 
+## Release Notes
+
+### 1.0.3
+
+- Fixed polling updates for existing entities by reading live state data from coordinator refreshes.
+- Fixed `InvalidStateError` for oversized state values (Home Assistant 255-char limit).
+- Large/complex values are now exposed in sensor attributes (`value_payload`) instead of entity state.
+
 ## License
 
 This project is licensed under the MIT License
