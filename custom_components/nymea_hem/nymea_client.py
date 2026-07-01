@@ -5,7 +5,10 @@ import logging
 from typing import Optional, Dict, Any
 
 _LOGGER = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)  # Enable detailed logging for debugging
+@property
+def server_info(self) -> dict[str, Any]:
+    """Return cached server info from handshake."""
+    return getattr(self, "_server_info", {})
 
 
 class NymeaClient:
