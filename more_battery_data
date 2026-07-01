@@ -1,6 +1,6 @@
 The following code creates two sensors to measure battery input/outpt kWh. The goal is to get the following sensors: 
-- 1. total amount of battery input kWh
-- 2. total amount of battery output kWh
+- **total amount of battery input kWh
+- **total amount of battery output kWh
 
 
 
