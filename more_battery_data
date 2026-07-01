@@ -1,4 +1,4 @@
-The following code creates two sensors to measure battery input/outpt kWh. The goal is to get the following sensors: 
+The following code creates two sensors to measure battery input/outpt kWh. The goal is to get the following sensors because unfortunately the Nymea Server does not provide this states although it is shown in the app: 
 - total amount of battery input kWh
 - total amount of battery output kWh
 
