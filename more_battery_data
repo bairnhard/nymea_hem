@@ -1,6 +1,6 @@
 The following code creates two sensors to measure battery input/outpt kWh. The goal is to get the following sensors: 
-- **total amount of battery input kWh
-- **total amount of battery output kWh
+- total amount of battery input kWh
+- total amount of battery output kWh
 
 
 
@@ -8,7 +8,8 @@ Based on that you can create dialy utility meter.
 
 I know this solution is not perfect, because if the state switches from "idle" to "charging"/"discharging" and the "battery_energy_level" sensor changes as well at the same time, I think total amount is not counted.
 I think the state has to be "charging"/"discharging" before the value of battery_energy_level changes. But at least it's 95% problem solved. 
-<code>
+
+
 - trigger:
     - platform: state
       entity_id: sensor.pv_anlage_battery_energy_level
