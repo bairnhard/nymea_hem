@@ -23,6 +23,7 @@ from homeassistant.const import (
 from homeassistant.helpers.device_registry import async_get as async_get_device_registry
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.typing import StateType
 
 from .const import (
     ATTR_STATE_NAME,
@@ -86,11 +87,20 @@ ENERGY_TOTAL_KEYWORDS = {
 }
 POWER_KEYWORDS = {"power", "load"}
 TEMPERATURE_KEYWORDS = {"temperature", "temp"}
-HUMIDITY_KEYWORDS = {"humidity", "humid"}
 CURRENT_KEYWORDS = {"current", "ampere", "amps"}
 VOLTAGE_KEYWORDS = {"voltage", "volt"}
 FREQUENCY_KEYWORDS = {"frequency", "hertz"}
 ILLUMINANCE_KEYWORDS = {"illuminance", "brightness", "lux"}
+# Keywords for datetime/timestamp values - must be checked BEFORE numeric keywords
+DATETIME_KEYWORDS = {
+    "time",
+    "slot",
+    "timestamp",
+    "date",
+    "iso",
+    "datetime",
+    "when",
+}
 
 
 def convert_value(value: Any, value_type: str) -> Any:
@@ -123,13 +133,37 @@ def infer_device_class(
     thing_data: dict[str, Any],
     state_type: dict[str, Any],
     native_unit: str | None,
+    value_type: str,
 ) -> SensorDeviceClass | None:
-    """Infer Home Assistant device class from interface, unit and naming."""
+    """Infer Home Assistant device class from interface, unit and naming.
+    
+    Only assigns numeric device classes (CURRENT, VOLTAGE, etc.) for numeric value types.
+    Checks for datetime indicators first to avoid misclassification.
+    """
+    # Check interfaces first
     interfaces = [str(i).lower() for i in thing_data.get("interfaces", [])]
     for interface in interfaces:
         if interface in INTERFACE_DEVICE_CLASS_MAP:
             return INTERFACE_DEVICE_CLASS_MAP[interface]
 
+    state_name = str(state_type.get("name", "")).lower()
+    display_name = str(state_type.get("displayName", "")).lower()
+    text = f"{state_name} {display_name}"
+
+    # Check for datetime/timestamp indicators FIRST (priority over other keywords)
+    # This prevents "current_time_slot" from being classified as CURRENT (current = electrical current)
+    if any(k in text for k in DATETIME_KEYWORDS):
+        _LOGGER.debug(
+            "Detected datetime/timestamp indicator in sensor name: %s - skipping numeric device classes",
+            state_type.get("displayName"),
+        )
+        return None
+
+    # Only check numeric device classes if the value type is actually numeric
+    if not is_numeric_value_type(value_type):
+        return None
+
+    # Now check unit-based device classes
     if native_unit == UnitOfTemperature.CELSIUS:
         return SensorDeviceClass.TEMPERATURE
     if native_unit == UnitOfEnergy.KILO_WATT_HOUR:
@@ -145,10 +179,7 @@ def infer_device_class(
     if native_unit == "lx":
         return SensorDeviceClass.ILLUMINANCE
 
-    state_name = str(state_type.get("name", "")).lower()
-    display_name = str(state_type.get("displayName", "")).lower()
-    text = f"{state_name} {display_name}"
-
+    # Check name-based keywords (only for numeric types)
     if any(k in text for k in TEMPERATURE_KEYWORDS):
         return SensorDeviceClass.TEMPERATURE
     if any(k in text for k in POWER_KEYWORDS):
@@ -313,6 +344,7 @@ class NymeaHEMStateSensor(CoordinatorEntity, SensorEntity):
             thing_data=thing_data,
             state_type=state_type,
             native_unit=native_unit,
+            value_type=self._value_type,
         )
         self._attr_state_class = infer_state_class(
             thing_data=thing_data,
@@ -366,7 +398,7 @@ class NymeaHEMStateSensor(CoordinatorEntity, SensorEntity):
         return converted, raw_value
 
     @property
-    def native_value(self) -> Any:
+    def native_value(self) -> StateType:
         """Return the current value in a HA-safe shape."""
         value, _ = self._get_live_value()
 
