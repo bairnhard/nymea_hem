@@ -63,7 +63,6 @@ INTERFACE_DEVICE_CLASS_MAP: dict[str, SensorDeviceClass] = {
     "smartmeter": SensorDeviceClass.ENERGY,
     "smartmeterproducer": SensorDeviceClass.POWER,
     "powersocket": SensorDeviceClass.POWER,
-    "humiditysensor": SensorDeviceClass.HUMIDITY,
 }
 
 MEASUREMENT_DEVICE_CLASSES = {
@@ -72,7 +71,6 @@ MEASUREMENT_DEVICE_CLASSES = {
     SensorDeviceClass.CURRENT,
     SensorDeviceClass.VOLTAGE,
     SensorDeviceClass.FREQUENCY,
-    SensorDeviceClass.HUMIDITY,
     SensorDeviceClass.ILLUMINANCE,
 }
 
@@ -184,8 +182,6 @@ def infer_device_class(
         return SensorDeviceClass.TEMPERATURE
     if any(k in text for k in POWER_KEYWORDS):
         return SensorDeviceClass.POWER
-    if any(k in text for k in HUMIDITY_KEYWORDS):
-        return SensorDeviceClass.HUMIDITY
     if any(k in text for k in CURRENT_KEYWORDS):
         return SensorDeviceClass.CURRENT
     if any(k in text for k in VOLTAGE_KEYWORDS):
