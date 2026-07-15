@@ -1,6 +1,6 @@
 {
     "domain": "nymea_hem",
-    "name": "Nymea HEM Integration",    
+    "name": "Nymea HEM Integration",
     "codeowners": ["@bairnhard"],
     "config_flow": true,
     "documentation": "https://github.com/bairnhard/nymea_hem",
@@ -10,5 +10,5 @@
     "requirements": [
         "voluptuous>=0.12.2"
     ],
-    "version": "1.0.3"
+    "version": "1.1.0"
 }
