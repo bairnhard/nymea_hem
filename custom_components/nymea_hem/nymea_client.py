@@ -5,7 +5,12 @@ import logging
 from typing import Optional, Dict, Any
 
 _LOGGER = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)  # Enable detailed logging for debugging
+
+
+@property
+def server_info(self) -> dict[str, Any]:
+    """Return cached server info from handshake."""
+    return getattr(self, "_server_info", {})
 
 
 class NymeaClient:
@@ -20,6 +25,20 @@ class NymeaClient:
         self._token = None
         self._reader = None
         self._writer = None
+        self._connection_timeout = 10  # seconds
+        self._read_timeout = 15  # seconds
+
+    def is_connected(self) -> bool:
+        """Check if the connection is currently active."""
+        if not self._reader or not self._writer:
+            _LOGGER.debug("Connection check: No reader/writer")
+            return False
+        
+        if self._writer.is_closing():
+            _LOGGER.debug("Connection check: Writer is closed")
+            return False
+            
+        return True
 
     async def _create_ssl_context(self) -> ssl.SSLContext:
         """Create SSL context for secure connection."""
@@ -30,36 +49,80 @@ class NymeaClient:
 
     async def _connect(self):
         """Establish connection with SSL/TLS or plain socket."""
-        if self._reader and self._writer:
+        if self.is_connected():
             _LOGGER.debug("Reusing existing connection.")
             return
 
         ssl_context = await self._create_ssl_context() if self._ssl_enabled else None
         try:
-            self._reader, self._writer = await asyncio.open_connection(
+            _LOGGER.debug(
+                "Attempting to connect to %s:%d (SSL: %s)",
                 self._host,
                 self._port,
-                ssl=ssl_context
+                self._ssl_enabled
             )
-            _LOGGER.debug(f"Connected to {self._host}:{self._port}")
+            
+            self._reader, self._writer = await asyncio.wait_for(
+                asyncio.open_connection(
+                    self._host,
+                    self._port,
+                    ssl=ssl_context
+                ),
+                timeout=self._connection_timeout
+            )
+            _LOGGER.info("Successfully connected to %s:%d", self._host, self._port)
+            
+        except asyncio.TimeoutError as e:
+            _LOGGER.error(
+                "Connection timeout after %d seconds to %s:%d",
+                self._connection_timeout,
+                self._host,
+                self._port
+            )
+            raise ConnectionError(f"Connection timeout to {self._host}:{self._port}") from e
+            
+        except (ConnectionRefusedError, OSError) as e:
+            _LOGGER.error(
+                "Failed to connect to %s:%d: %s",
+                self._host,
+                self._port,
+                e
+            )
+            raise ConnectionError(f"Connection refused to {self._host}:{self._port}") from e
+            
         except Exception as e:
-            _LOGGER.error(f"Connection error: {e}")
+            _LOGGER.error("Unexpected connection error: %s", e)
             raise
 
     async def _read_full_response(self) -> str:
         """Read a full JSON response from the reader."""
         buffer = ""
-        while True:
-            chunk = await self._reader.read(4096)
-            if not chunk:
-                break
-            buffer += chunk.decode()
-            try:
-                json.loads(buffer)  # Validate if JSON is complete
-                return buffer
-            except json.JSONDecodeError:
-                continue
-        raise ValueError("Incomplete JSON response")
+        try:
+            while True:
+                chunk = await asyncio.wait_for(
+                    self._reader.read(4096),
+                    timeout=self._read_timeout
+                )
+                if not chunk:
+                    _LOGGER.warning("Connection closed by server")
+                    raise ConnectionError("Connection closed by remote host")
+                    
+                buffer += chunk.decode()
+                try:
+                    json.loads(buffer)  # Validate if JSON is complete
+                    return buffer
+                except json.JSONDecodeError:
+                    continue
+                    
+        except asyncio.TimeoutError as e:
+            _LOGGER.error("Read timeout after %d seconds", self._read_timeout)
+            raise ConnectionError("Read timeout from server") from e
+            
+        except Exception as e:
+            if isinstance(e, ConnectionError):
+                raise
+            _LOGGER.error("Error reading response: %s", e)
+            raise ConnectionError(f"Failed to read response: {e}") from e
 
     async def _handshake(self):
         """Perform the JSONRPC.Hello handshake."""
@@ -77,7 +140,7 @@ class NymeaClient:
             self._writer.write((json.dumps(hello_message) + "\n").encode())
             await self._writer.drain()
             hello_response = await self._read_full_response()
-            _LOGGER.debug(f"Hello Response: {hello_response}")
+            _LOGGER.debug("Hello Response received")
             response_data = json.loads(hello_response)
 
             if response_data.get("status") != "success":
@@ -98,16 +161,21 @@ class NymeaClient:
                 "uuid": params.get("uuid"),
                 "version": params.get("version"),                
             }
-            _LOGGER.info(f"Server Info: {self._server_info}")
+            _LOGGER.info("Server handshake successful: %s (version: %s)", 
+                        self._server_info.get("name"), 
+                        self._server_info.get("version"))
 
         except Exception as e:
-            _LOGGER.error(f"Error during handshake: {e}")
+            _LOGGER.error("Error during handshake: %s", e)
+            # Close connection on handshake failure
+            await self.close_connection()
             raise
 
 
     async def authenticate(self):
         """Authenticate and establish session."""
         try:
+            _LOGGER.debug("Starting authentication process")
             await self._connect()
             await self._handshake()
 
@@ -120,20 +188,23 @@ class NymeaClient:
                     "deviceName": "HomeAssistant"
                 }
             }) + "\n"
+            
             self._writer.write(auth_message.encode())
             await self._writer.drain()
             auth_response = await self._read_full_response()
-            _LOGGER.debug(f"Auth Response: {auth_response}")
+            _LOGGER.debug("Authentication response received")
 
             auth_data = json.loads(auth_response)
             if not auth_data.get("params", {}).get("success", False):
-                _LOGGER.error("Authentication failed.")
+                _LOGGER.error("Authentication failed: Invalid credentials or server error")
                 raise ValueError("Authentication failed.")
+                
             self._token = auth_data["params"]["token"]
-            _LOGGER.info(f"Authenticated successfully. Token: {self._token}")
+            _LOGGER.info("Successfully authenticated and received token")
 
         except Exception as e:
-            _LOGGER.error(f"Authentication error: {e}")
+            _LOGGER.error("Authentication error: %s", e)
+            await self.close_connection()
             raise
         
     async def close_connection(self):
@@ -144,9 +215,12 @@ class NymeaClient:
                 await self._writer.wait_closed()
                 _LOGGER.debug("Connection closed cleanly.")
             except Exception as e:
-                _LOGGER.warning(f"Error closing connection: {e}")
-                self._writer.transport.abort()
-                _LOGGER.debug("Connection forcefully closed.")
+                _LOGGER.debug("Error during clean close: %s", e)
+                try:
+                    self._writer.transport.abort()
+                    _LOGGER.debug("Connection forcefully closed.")
+                except Exception as inner_e:
+                    _LOGGER.debug("Error during force close: %s", inner_e)
             finally:
                 self._reader = None
                 self._writer = None
@@ -154,14 +228,15 @@ class NymeaClient:
     async def _ensure_authenticated(self):
         """Ensure the connection is established and authenticated."""
         try:
-            if not self._reader or not self._writer:
+            if not self.is_connected():
                 _LOGGER.debug("No active connection. Re-authenticating...")
                 await self.authenticate()
             elif not self._token:
                 _LOGGER.debug("No valid token. Re-authenticating...")
                 await self.authenticate()
         except Exception as e:
-            _LOGGER.error(f"Error ensuring authentication: {e}")
+            _LOGGER.error("Error ensuring authentication: %s", e)
+            await self.close_connection()
             raise
 
     async def get_things(self):
@@ -174,17 +249,25 @@ class NymeaClient:
                 "method": "Integrations.GetThings",
                 "token": self._token
             }) + "\n"
+            
             self._writer.write(get_things_message.encode())
             await self._writer.drain()
             things_response = await self._read_full_response()
-            _LOGGER.debug(f"Things Response: {things_response}")
+            _LOGGER.debug("Things response received")
 
             things_data = json.loads(things_response)
             devices = things_data.get("params", {}).get("things", [])
-            _LOGGER.info(f"Retrieved {len(devices)} devices.")
+            _LOGGER.info("Retrieved %d devices from Nymea", len(devices))
             return devices
+            
+        except ConnectionError as e:
+            _LOGGER.error("Connection error while fetching things: %s", e)
+            await self.close_connection()
+            raise
+            
         except Exception as e:
-            _LOGGER.error(f"Error fetching things: {e}")
+            _LOGGER.error("Error fetching things: %s", e)
+            await self.close_connection()
             raise
 
     async def get_thing_class_details(self, thing_class_id):
@@ -209,7 +292,7 @@ class NymeaClient:
             self._writer.write((json.dumps(request) + "\n").encode())
             await self._writer.drain()
             response = await self._read_full_response()
-            _LOGGER.debug(f"Thing Class Details Response: {response}")
+            _LOGGER.debug("Thing class details response received")
 
             data = json.loads(response)
             if data.get("status") == "success":
@@ -217,8 +300,11 @@ class NymeaClient:
             else:
                 raise ValueError(f"Error fetching thing class details: {data.get('error')}")
 
-        except Exception as e:
-            _LOGGER.error(f"Error in get_thing_class_details: {e}")
+        except ConnectionError as e:
+            _LOGGER.error("Connection error while fetching thing class details: %s", e)
+            await self.close_connection()
             raise
-
-
+            
+        except Exception as e:
+            _LOGGER.error("Error in get_thing_class_details: %s", e)
+            raise
