@@ -34,6 +34,7 @@ from .const import (
     ATTR_VALUE_PAYLOAD,
     DOMAIN,
 )
+from .entity import writable_state_map
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -89,7 +90,6 @@ CURRENT_KEYWORDS = {"current", "ampere", "amps"}
 VOLTAGE_KEYWORDS = {"voltage", "volt"}
 FREQUENCY_KEYWORDS = {"frequency", "hertz"}
 ILLUMINANCE_KEYWORDS = {"illuminance", "brightness", "lux"}
-# Keywords for datetime/timestamp values - must be checked BEFORE numeric keywords
 DATETIME_KEYWORDS = {
     "time",
     "slot",
@@ -133,12 +133,7 @@ def infer_device_class(
     native_unit: str | None,
     value_type: str,
 ) -> SensorDeviceClass | None:
-    """Infer Home Assistant device class from interface, unit and naming.
-    
-    Only assigns numeric device classes (CURRENT, VOLTAGE, etc.) for numeric value types.
-    Checks for datetime indicators first to avoid misclassification.
-    """
-    # Check interfaces first
+    """Infer Home Assistant device class from interface, unit and naming."""
     interfaces = [str(i).lower() for i in thing_data.get("interfaces", [])]
     for interface in interfaces:
         if interface in INTERFACE_DEVICE_CLASS_MAP:
@@ -148,20 +143,16 @@ def infer_device_class(
     display_name = str(state_type.get("displayName", "")).lower()
     text = f"{state_name} {display_name}"
 
-    # Check for datetime/timestamp indicators FIRST (priority over other keywords)
-    # This prevents "current_time_slot" from being classified as CURRENT (current = electrical current)
     if any(k in text for k in DATETIME_KEYWORDS):
         _LOGGER.debug(
-            "Detected datetime/timestamp indicator in sensor name: %s - skipping numeric device classes",
+            "Datetime indicator in sensor name %s; skipping numeric device classes",
             state_type.get("displayName"),
         )
         return None
 
-    # Only check numeric device classes if the value type is actually numeric
     if not is_numeric_value_type(value_type):
         return None
 
-    # Now check unit-based device classes
     if native_unit == UnitOfTemperature.CELSIUS:
         return SensorDeviceClass.TEMPERATURE
     if native_unit == UnitOfEnergy.KILO_WATT_HOUR:
@@ -177,7 +168,6 @@ def infer_device_class(
     if native_unit == "lx":
         return SensorDeviceClass.ILLUMINANCE
 
-    # Check name-based keywords (only for numeric types)
     if any(k in text for k in TEMPERATURE_KEYWORDS):
         return SensorDeviceClass.TEMPERATURE
     if any(k in text for k in POWER_KEYWORDS):
@@ -210,7 +200,10 @@ def infer_state_class(
     if device_class in MEASUREMENT_DEVICE_CLASSES:
         return SensorStateClass.MEASUREMENT
 
-    if device_class == SensorDeviceClass.ENERGY and native_unit == UnitOfEnergy.KILO_WATT_HOUR:
+    if (
+        device_class == SensorDeviceClass.ENERGY
+        and native_unit == UnitOfEnergy.KILO_WATT_HOUR
+    ):
         state_name = str(state_type.get("name", "")).lower()
         display_name = str(state_type.get("displayName", "")).lower()
         text = f"{state_name} {display_name}"
@@ -228,7 +221,6 @@ def infer_state_class(
 async def async_setup_entry(hass, config_entry, async_add_entities):
     """Set up sensors for the Nymea integration."""
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
-    client = entry_data["client"]
     coordinator = entry_data["coordinator"]
     server_info = entry_data.get("server_info", {})
 
@@ -251,26 +243,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             server_identifier=server_identifier,
         )
     ]
-
     for thing in coordinator.data or []:
-        thing_class_id = thing.get("thingClassId")
-        thing_class_details = None
-
-        try:
-            if thing_class_id:
-                result = await client.get_thing_class_details(thing_class_id)
-                if result:
-                    thing_class_details = result[0]
-        except Exception as err:
-            _LOGGER.error(
-                "Error fetching thing class details for %s: %s",
-                thing.get("name"),
-                err,
-            )
-
-        if thing_class_details:
-            thing["thingClassDetails"] = thing_class_details
-
         state_types = thing.get("thingClassDetails", {}).get("stateTypes", [])
         if not state_types:
             _LOGGER.debug("No stateTypes available for thing %s", thing.get("name"))
@@ -289,11 +262,16 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             via_device=(DOMAIN, server_identifier),
         )
 
-        state_type_map = {state_type["id"]: state_type for state_type in state_types if "id" in state_type}
+        state_type_map = {
+            state_type["id"]: state_type
+            for state_type in state_types
+            if "id" in state_type
+        }
+        writable_states = writable_state_map(thing)
 
         for state in thing.get("states", []):
             state_type = state_type_map.get(state.get("stateTypeId"))
-            if not state_type:
+            if not state_type or state_type.get("id") in writable_states:
                 continue
 
             sensors.append(
@@ -328,7 +306,9 @@ class NymeaHEMStateSensor(CoordinatorEntity, SensorEntity):
         self._value_type = state_type.get("type", "String")
         self._max_state_len = 255
 
-        display_name = state_type.get("displayName") or state_type.get("name") or "Unknown"
+        display_name = (
+            state_type.get("displayName") or state_type.get("name") or "Unknown"
+        )
         self._attr_name = display_name
         self._attr_unique_id = f"{thing_data['id']}_{state_type['id']}"
 
@@ -393,17 +373,18 @@ class NymeaHEMStateSensor(CoordinatorEntity, SensorEntity):
         converted = convert_value(raw_value, self._value_type)
         return converted, raw_value
 
+    def _get_state_value(self) -> tuple[StateType, Any, bool]:
+        """Return the safe state, raw value and whether it fits in the state."""
+        value, raw_value = self._get_live_value()
+        value_in_state = not isinstance(value, (dict, list, tuple, set)) and not (
+            isinstance(value, str) and len(value) > self._max_state_len
+        )
+        return (value if value_in_state else None), raw_value, value_in_state
+
     @property
     def native_value(self) -> StateType:
         """Return the current value in a HA-safe shape."""
-        value, _ = self._get_live_value()
-
-        if isinstance(value, (dict, list, tuple, set)):
-            return None
-
-        if isinstance(value, str) and len(value) > self._max_state_len:
-            return None
-
+        value, _, _ = self._get_state_value()
         return value
 
     @property
@@ -415,7 +396,7 @@ class NymeaHEMStateSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
         thing = self._get_live_thing_data()
-        value, raw_value = self._get_live_value()
+        _, raw_value, value_in_state = self._get_state_value()
 
         attributes: dict[str, Any] = {
             ATTR_STATE_TYPE_ID: self._state_type["id"],
@@ -429,20 +410,18 @@ class NymeaHEMStateSensor(CoordinatorEntity, SensorEntity):
             ATTR_THING_CLASS_NAME: thing.get(
                 "thingClassName", self._thing_data.get("thingClassName")
             ),
-            "interfaces": thing.get("interfaces", self._thing_data.get("interfaces", [])),
+            "interfaces": thing.get(
+                "interfaces", self._thing_data.get("interfaces", [])
+            ),
             "nymea_unit": self._state_type.get("unit"),
             "value_type": self._value_type,
         }
 
-        if isinstance(value, (dict, list, tuple, set)):
+        attributes[ATTR_VALUE_IN_STATE] = value_in_state
+        if not value_in_state:
             attributes[ATTR_VALUE_PAYLOAD] = raw_value
-            attributes[ATTR_VALUE_IN_STATE] = False
-        elif isinstance(value, str) and len(value) > self._max_state_len:
-            attributes[ATTR_VALUE_PAYLOAD] = raw_value
-            attributes["value_length"] = len(value)
-            attributes[ATTR_VALUE_IN_STATE] = False
-        else:
-            attributes[ATTR_VALUE_IN_STATE] = True
+            if isinstance(raw_value, str):
+                attributes["value_length"] = len(raw_value)
 
         return attributes
 
@@ -454,7 +433,12 @@ class NymeaServerInfoSensor(CoordinatorEntity, SensorEntity):
     _attr_name = "Server Info"
     _attr_icon = "mdi:server"
 
-    def __init__(self, coordinator, server_info: dict[str, Any], server_identifier: str) -> None:
+    def __init__(
+        self,
+        coordinator,
+        server_info: dict[str, Any],
+        server_identifier: str,
+    ) -> None:
         """Initialize the server info sensor."""
         super().__init__(coordinator)
         self._server_info = server_info
@@ -487,7 +471,9 @@ class NymeaServerInfoSensor(CoordinatorEntity, SensorEntity):
             "language": self._server_info.get("language"),
             "locale": self._server_info.get("locale"),
             "experiences": [
-                exp.get("name") for exp in self._server_info.get("experiences", []) if isinstance(exp, dict)
+                exp.get("name")
+                for exp in self._server_info.get("experiences", [])
+                if isinstance(exp, dict)
             ],
             "authentication_required": self._server_info.get("authentication_required"),
             "initial_setup_required": self._server_info.get("initial_setup_required"),
